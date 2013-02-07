@@ -27,19 +27,19 @@ var tmplBefore, tmplAfter string
 func main() {
 	flag.Parse()
 
-  var err error
+	var err error
 	root, err = filepath.Abs(*optPath)
 
 	if err != nil {
 		log.Fatalf("Could not get the absolute path of %v. %v", *optPath, err)
 	}
 
-  log.Printf("Rendering files in path %v.\n", root)
+	log.Printf("Rendering files in path %v.\n", root)
 
-  setupPublic()
-  setupTemplate()
+	setupPublic()
+	setupTemplate()
 
-  http.HandleFunc("/", renderer)
+	http.HandleFunc("/", renderer)
 
 	err = http.ListenAndServe(*optAddr, nil)
 
@@ -49,9 +49,9 @@ func main() {
 }
 
 func setupPublic() {
-  public := filepath.Join(root, *optPublic)
+	public := filepath.Join(root, *optPublic)
 
-  log.Printf("Public folder is %v.\n", public)
+	log.Printf("Public folder is %v.\n", public)
 
 	h := http.StripPrefix("/public/", http.FileServer(http.Dir(public)))
 
@@ -81,44 +81,44 @@ func setupTemplate() {
 }
 
 func renderer(w http.ResponseWriter, r *http.Request) {
-  log.Println(r.URL.Path)
+	log.Println(r.URL.Path)
 
-  p, file := path.Split(r.URL.Path)
+	p, file := path.Split(r.URL.Path)
 
-  if p == "" {
-    p = *optHomeDir
-  }
+	if p == "" {
+		p = *optHomeDir
+	}
 
-  if file == "" {
-    file = *optDefault
-  }
+	if file == "" {
+		file = *optDefault
+	}
 
-  log.Printf("Serving %v%v\n", p, file)
+	log.Printf("Serving %v%v\n", p, file)
 
-  fp := path.Join(root, p, file)
+	fp := path.Join(root, p, file)
 
-  ext := filepath.Ext(fp)
-  showMd := ext == ".md"
+	ext := filepath.Ext(fp)
+	showMd := ext == ".md"
 
-  if ext == "" {
-    fp += ".md"
-  }
+	if ext == "" {
+		fp += ".md"
+	}
 
-  bytes, err := ioutil.ReadFile(fp)
+	bytes, err := ioutil.ReadFile(fp)
 
-  if err != nil {
-    // return 404/500
-    fmt.Fprint(w, tmplBefore + "404 - File not found" + tmplAfter)
-    return
-  }
+	if err != nil {
+		// return 404/500
+		fmt.Fprint(w, tmplBefore+"404 - File not found"+tmplAfter)
+		return
+	}
 
-  if (showMd) {
-    fmt.Fprint(w, string(bytes))
-    return
-  }
+	if showMd {
+		fmt.Fprint(w, string(bytes))
+		return
+	}
 
-  bytes = md.MarkdownCommon(bytes)
-  fmt.Fprintf(w, tmplBefore + string(bytes) + tmplAfter)
+	bytes = md.MarkdownCommon(bytes)
+	fmt.Fprintf(w, tmplBefore+string(bytes)+tmplAfter)
 }
 
 func CachePreventionHandler(h http.Handler) http.Handler {
