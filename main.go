@@ -22,6 +22,7 @@ var optDefault = flag.String("default", "index", "default file to render")
 var optNoCache = flag.Bool("noCache", true, "sends the Cache-Control headers to the client to prevent caching")
 
 var root string
+var cache map[string]string
 var tmplBefore, tmplAfter string
 
 func main() {
@@ -35,6 +36,8 @@ func main() {
 	}
 
 	log.Printf("Rendering files in path %v.\n", root)
+
+  cache = make(map[string]string)
 
 	setupPublic()
 	setupTemplate()
@@ -81,8 +84,6 @@ func setupTemplate() {
 }
 
 func renderer(w http.ResponseWriter, r *http.Request) {
-	log.Println(r.URL.Path)
-
 	p, file := path.Split(r.URL.Path)
 
 	if p == "" {
@@ -93,9 +94,23 @@ func renderer(w http.ResponseWriter, r *http.Request) {
 		file = *optDefault
 	}
 
-	log.Printf("Serving %v%v\n", p, file)
+  page, err := getPage(p, file)
 
-	fp := path.Join(root, p, file)
+  if err != nil {
+		fmt.Fprint(w, tmplBefore+"Page doesn't exist!"+tmplAfter)
+		return
+	}
+
+	r.Body.Close()
+	fmt.Fprintf(w, tmplBefore+page+tmplAfter)
+}
+
+func getPage(p, file string) (string, error) {
+  fp := path.Join(root, p, file)
+
+  if v, ok := cache[fp]; ok {
+    return v, nil
+  }
 
 	ext := filepath.Ext(fp)
 	showMd := ext == ".md"
@@ -104,21 +119,20 @@ func renderer(w http.ResponseWriter, r *http.Request) {
 		fp += ".md"
 	}
 
-	bytes, err := ioutil.ReadFile(fp)
+  bytes, err := ioutil.ReadFile(fp)
 
-	if err != nil {
-		// return 404/500
-		fmt.Fprint(w, tmplBefore+"404 - File not found"+tmplAfter)
-		return
-	}
+  if err != nil {
+    return "", err
+  }
 
 	if showMd {
-		fmt.Fprint(w, string(bytes))
-		return
+		return string(bytes), nil
 	}
 
-	bytes = md.MarkdownCommon(bytes)
-	fmt.Fprintf(w, tmplBefore+string(bytes)+tmplAfter)
+  html := string(md.MarkdownCommon(bytes))
+
+  cache[fp] = html
+  return html, nil
 }
 
 func CachePreventionHandler(h http.Handler) http.Handler {
