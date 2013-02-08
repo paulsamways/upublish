@@ -15,11 +15,12 @@ import (
 
 var optAddr = flag.String("addr", ":8000", "address to listen on")
 var optPath = flag.String("path", ".", "path of the static files to serve")
-var optPublic = flag.String("public", "public", "name of the 'public' directory")
+var optStaticDir = flag.String("public", "public", "name of the 'public' directory")
 var optTemplate = flag.String("tmpl", "template.html", "template to use")
 var optHomeDir = flag.String("home", "", "home directory")
 var optDefault = flag.String("default", "index", "default file to render")
-var optNoCache = flag.Bool("noCache", true, "sends the Cache-Control headers to the client to prevent caching")
+var optNoCache = flag.Bool("noCache", false, "sends the Cache-Control headers to the client to prevent caching")
+var optExt = flag.String("ext", "md", "extension of the markdown files")
 
 var root string
 var cache map[string]string
@@ -35,11 +36,9 @@ func main() {
 		log.Fatalf("Could not get the absolute path of %v. %v", *optPath, err)
 	}
 
-	log.Printf("Rendering files in path %v.\n", root)
+	cache = make(map[string]string)
 
-  cache = make(map[string]string)
-
-	setupPublic()
+	setupStatic()
 	setupTemplate()
 
 	http.HandleFunc("/", renderer)
@@ -51,18 +50,17 @@ func main() {
 	}
 }
 
-func setupPublic() {
-	public := filepath.Join(root, *optPublic)
+func setupStatic() {
+  static := "/"+*optStaticDir+"/"
+  public := filepath.Join(root, *optStaticDir)
 
-	log.Printf("Public folder is %v.\n", public)
-
-	h := http.StripPrefix("/public/", http.FileServer(http.Dir(public)))
+	h := http.StripPrefix(static, http.FileServer(http.Dir(public)))
 
 	if *optNoCache {
 		h = CachePreventionHandler(h)
 	}
 
-	http.Handle("/public/", h)
+	http.Handle(static, h)
 }
 
 func setupTemplate() {
@@ -94,9 +92,9 @@ func renderer(w http.ResponseWriter, r *http.Request) {
 		file = *optDefault
 	}
 
-  page, err := getPage(p, file)
+	page, err := getPage(p, file)
 
-  if err != nil {
+	if err != nil {
 		fmt.Fprint(w, tmplBefore+"Page doesn't exist!"+tmplAfter)
 		return
 	}
@@ -106,33 +104,22 @@ func renderer(w http.ResponseWriter, r *http.Request) {
 }
 
 func getPage(p, file string) (string, error) {
-  fp := path.Join(root, p, file)
+	fp := path.Join(root, p, file) + "." + *optExt
 
-  if v, ok := cache[fp]; ok {
-    return v, nil
-  }
-
-	ext := filepath.Ext(fp)
-	showMd := ext == ".md"
-
-	if ext == "" {
-		fp += ".md"
+	if v, ok := cache[fp]; ok {
+		return v, nil
 	}
 
-  bytes, err := ioutil.ReadFile(fp)
+	bytes, err := ioutil.ReadFile(fp)
 
-  if err != nil {
-    return "", err
-  }
-
-	if showMd {
-		return string(bytes), nil
+	if err != nil {
+		return "", err
 	}
 
-  html := string(md.MarkdownCommon(bytes))
+	html := string(md.MarkdownCommon(bytes))
 
-  cache[fp] = html
-  return html, nil
+	cache[fp] = html
+	return html, nil
 }
 
 func CachePreventionHandler(h http.Handler) http.Handler {
