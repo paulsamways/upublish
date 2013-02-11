@@ -106,26 +106,6 @@ func renderer(w http.ResponseWriter, r *http.Request) {
   write(w, r, page)
 }
 
-func writeError(w http.ResponseWriter, r *http.Request, err error) {
-  errFmt := "<h2>Oops! We've hit a bit of a problem...</h2><p>%v</p>"
-
-  w.Header().Set("Content-Type", "text/html")
-
-  b := new(bytes.Buffer)
-  b.Write(tmpl[0])
-
-  if pErr, ok := err.(*PageError); ok {
-    w.WriteHeader(pErr.StatusCode)
-    fmt.Fprintf(b, errFmt, pErr.Message)
-  } else {
-    w.WriteHeader(http.StatusInternalServerError)
-    fmt.Fprintf(b, errFmt, "Page not available")
-  }
-
-  b.Write(tmpl[1])
-  b.WriteTo(w)
-}
-
 func write(w http.ResponseWriter, r *http.Request, page *Page) {
   if etag := r.Header.Get("If-None-Match"); strings.EqualFold(etag, page.Hash) {
     w.WriteHeader(http.StatusNotModified)
@@ -153,4 +133,24 @@ func write(w http.ResponseWriter, r *http.Request, page *Page) {
     w.Write(page.Content)
     w.Write(tmpl[1])
   }
+}
+
+func writeError(w http.ResponseWriter, r *http.Request, err error) {
+  errFmt := "<h2>Oops! We've hit a bit of a problem...</h2><p>%v</p>"
+
+  w.Header().Set("Content-Type", "text/html")
+
+  b := new(bytes.Buffer)
+  b.Write(tmpl[0])
+
+  if pErr, ok := err.(*PageError); ok {
+    w.WriteHeader(pErr.StatusCode)
+    fmt.Fprintf(b, errFmt, pErr.Message)
+  } else {
+    w.WriteHeader(http.StatusInternalServerError)
+    fmt.Fprintf(b, errFmt, "Page not available")
+  }
+
+  b.Write(tmpl[1])
+  b.WriteTo(w)
 }
