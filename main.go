@@ -1,18 +1,21 @@
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
 var root string
 var cache map[string]*Page
-var tmplBefore, tmplAfter string
+var tmpl [][]byte
 
 func main() {
   parseOptions()
@@ -56,20 +59,17 @@ func setupStatic() {
 
 func setupTemplate() {
 	path := filepath.Join(root, *optTemplate)
-	bytes, err := ioutil.ReadFile(path)
+	b, err := ioutil.ReadFile(path)
 
 	if err != nil {
 		log.Fatal("Could not read template: ", err)
 	}
 
-	parts := strings.Split(string(bytes), "{{content}}")
+  tmpl = bytes.Split(b, []byte("{{content}}"))
 
-	if len(parts) != 2 {
+	if len(tmpl) != 2 {
 		log.Fatal("Template was not in a valid format")
 	}
-
-	tmplBefore = parts[0]
-	tmplAfter = parts[1]
 }
 
 func renderer(w http.ResponseWriter, r *http.Request) {
@@ -93,18 +93,8 @@ func renderer(w http.ResponseWriter, r *http.Request) {
     page, err = GetPage(abs)
 
     if err != nil {
-      errFmt := "<h2>Oops! We've hit a bit of a problem...</h2><p>%v</p>"
-
-      if pErr, ok := err.(*PageError); ok {
-        w.WriteHeader(pErr.StatusCode)
-        write(w, fmt.Sprintf(errFmt, pErr.Message))
-      } else {
-        w.WriteHeader(http.StatusInternalServerError)
-        write(w, fmt.Sprintf(errFmt, "Page not available"))
-      }
-
       log.Printf("[%v] %v", abs, err)
-
+      writeError(w, r, err)
       return
     }
 
@@ -113,15 +103,54 @@ func renderer(w http.ResponseWriter, r *http.Request) {
     }
   }
 
+  write(w, r, page)
+}
+
+func writeError(w http.ResponseWriter, r *http.Request, err error) {
+  errFmt := "<h2>Oops! We've hit a bit of a problem...</h2><p>%v</p>"
+
+  w.Header().Set("Content-Type", "text/html")
+
+  b := new(bytes.Buffer)
+  b.Write(tmpl[0])
+
+  if pErr, ok := err.(*PageError); ok {
+    w.WriteHeader(pErr.StatusCode)
+    fmt.Fprintf(b, errFmt, pErr.Message)
+  } else {
+    w.WriteHeader(http.StatusInternalServerError)
+    fmt.Fprintf(b, errFmt, "Page not available")
+  }
+
+  b.Write(tmpl[1])
+  b.WriteTo(w)
+}
+
+func write(w http.ResponseWriter, r *http.Request, page *Page) {
   if etag := r.Header.Get("If-None-Match"); strings.EqualFold(etag, page.Hash) {
     w.WriteHeader(http.StatusNotModified)
     return
   }
 
-  w.Header().Add("Etag", page.Hash)
-  write(w, page.Content)
-}
+  w.Header().Set("Etag", page.Hash)
+  w.Header().Set("Content-Type", "text/html")
 
-func write(w http.ResponseWriter, value string) {
-  fmt.Fprintf(w, tmplBefore+value+tmplAfter)
+  if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+    b := new(bytes.Buffer)
+    gz := gzip.NewWriter(b)
+    gz.Write(tmpl[0])
+    gz.Write(page.Content)
+    gz.Write(tmpl[1])
+    gz.Close()
+
+    w.Header().Set("Content-Encoding", "gzip")
+    w.Header().Set("Content-Length", strconv.Itoa(b.Len()))
+
+    b.WriteTo(w)
+  } else {
+    w.Header().Set("Content-Length", strconv.Itoa(len(tmpl[0]) + len(page.Content) + len(tmpl[1])))
+    w.Write(tmpl[0])
+    w.Write(page.Content)
+    w.Write(tmpl[1])
+  }
 }

@@ -12,7 +12,7 @@ import (
 
 type Page struct {
   Path string
-  Content string
+  Content []byte
   Hash string
 }
 
@@ -40,7 +40,7 @@ func GetPage(absPath string) (*Page, error) {
   page := &Page{}
   page.Path = absPath
   page.Hash = hash(bytes)
-	page.Content = string(md.MarkdownCommon(bytes))
+	page.Content = md.MarkdownCommon(bytes)
 
 	return page, nil
 }
