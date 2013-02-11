@@ -113,7 +113,7 @@ func write(w http.ResponseWriter, r *http.Request, page *Page) {
   }
 
   w.Header().Set("Etag", page.Hash)
-  w.Header().Set("Content-Type", "text/html")
+  w.Header().Set("Content-Type", "text/html; charset=UTF-8")
 
   if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
     b := new(bytes.Buffer)
@@ -138,7 +138,7 @@ func write(w http.ResponseWriter, r *http.Request, page *Page) {
 func writeError(w http.ResponseWriter, r *http.Request, err error) {
   errFmt := "<h2>Oops! We've hit a bit of a problem...</h2><p>%v</p>"
 
-  w.Header().Set("Content-Type", "text/html")
+  w.Header().Set("Content-Type", "text/html; charset=UTF-8")
 
   b := new(bytes.Buffer)
   b.Write(tmpl[0])
