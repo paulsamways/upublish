@@ -1,7 +1,6 @@
 package main
 
 import (
-  "crypto/md5"
   "fmt"
   "io/ioutil"
   "net/http"
@@ -39,15 +38,16 @@ func GetPage(absPath string) (*Page, error) {
 
   page := &Page{}
   page.Path = absPath
-  page.Hash = hash(bytes)
 	page.Content = md.MarkdownCommon(bytes)
 
+  hTmp := make([]byte, 16)
+  h := hash(bytes)
+
+  for i := 0; i < 16; i++ {
+    hTmp[i] =  h[i] ^ tmplHash[i]
+  }
+
+  page.Hash = fmt.Sprintf("%x", hTmp)
+
 	return page, nil
-}
-
-func hash(value []byte) string {
-  h := md5.New()
-  h.Write(value)
-
-  return fmt.Sprintf("%x", h.Sum(nil))
 }

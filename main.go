@@ -11,11 +11,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+  "crypto/md5"
 )
 
 var root string
 var cache map[string]*Page
 var tmpl [][]byte
+var tmplHash []byte
 
 func main() {
   parseOptions()
@@ -31,6 +33,13 @@ func main() {
 
 	setupStatic()
 	setupTemplate()
+  err = setupWatchers()
+
+  if err == nil {
+    defer func() {
+      watcher.Close()
+    }()
+  }
 
 	http.HandleFunc("/", renderer)
 
@@ -65,6 +74,7 @@ func setupTemplate() {
 		log.Fatal("Could not read template: ", err)
 	}
 
+  tmplHash = hash(b)
   tmpl = bytes.Split(b, []byte("{{content}}"))
 
 	if len(tmpl) != 2 {
@@ -153,4 +163,10 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 
   b.Write(tmpl[1])
   b.WriteTo(w)
+}
+
+func hash(value []byte) []byte {
+  h := md5.New()
+  h.Write(value)
+  return h.Sum(nil)
 }
