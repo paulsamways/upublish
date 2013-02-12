@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"compress/gzip"
+	"crypto/md5"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -11,16 +13,27 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-  "crypto/md5"
+
+	"github.com/howeyc/fsnotify"
 )
+
+var optAddr = flag.String("addr", ":8000", "address to listen on")
+var optPath = flag.String("path", ".", "path of the static files to serve")
+var optStaticDir = flag.String("public", "public", "name of the 'public' directory")
+var optTemplate = flag.String("tmpl", "template.html", "template to use")
+var optHomeDir = flag.String("home", "", "home directory")
+var optDefault = flag.String("default", "index", "default file to render")
+var optDebug = flag.Bool("debug", false, "enables debug mode")
+var optExt = flag.String("ext", "md", "extension of the markdown files")
 
 var root string
 var cache map[string]*Page
+var watcher *fsnotify.Watcher
 var tmpl [][]byte
 var tmplHash []byte
 
 func main() {
-  parseOptions()
+	flag.Parse()
 
 	var err error
 	root, err = filepath.Abs(*optPath)
@@ -29,17 +42,13 @@ func main() {
 		log.Fatalf("Could not get the absolute path of %v. %v", *optPath, err)
 	}
 
-	cache = make(map[string]*Page)
-
 	setupStatic()
 	setupTemplate()
-  err = setupWatchers()
+	err = setupWatchers()
 
-  if err == nil {
-    defer func() {
-      watcher.Close()
-    }()
-  }
+	if err == nil {
+		defer watcher.Close()
+	}
 
 	http.HandleFunc("/", renderer)
 
@@ -51,22 +60,23 @@ func main() {
 }
 
 func setupStatic() {
-  static := "/"+*optStaticDir+"/"
-  public := filepath.Join(root, *optStaticDir)
+	static := "/" + *optStaticDir + "/"
+	public := filepath.Join(root, *optStaticDir)
 
 	h := http.StripPrefix(static, http.FileServer(http.Dir(public)))
 
 	http.Handle(static, h)
-  http.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
-    http.ServeFile(w, r, filepath.Join(public, "favicon.ico"))
-  })
-  http.HandleFunc("/robots.txt", func(w http.ResponseWriter, r *http.Request) {
-    http.ServeFile(w, r, filepath.Join(public, "robots.txt"))
-  })
+	http.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, filepath.Join(public, "favicon.ico"))
+	})
+	http.HandleFunc("/robots.txt", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, filepath.Join(public, "robots.txt"))
+	})
 }
 
-
 func setupTemplate() {
+	cache = make(map[string]*Page)
+
 	path := filepath.Join(root, *optTemplate)
 	b, err := ioutil.ReadFile(path)
 
@@ -74,12 +84,45 @@ func setupTemplate() {
 		log.Fatal("Could not read template: ", err)
 	}
 
-  tmplHash = hash(b)
-  tmpl = bytes.Split(b, []byte("{{content}}"))
+	tmplHash = hash(b)
+	tmpl = bytes.Split(b, []byte("{{content}}"))
 
 	if len(tmpl) != 2 {
 		log.Fatal("Template was not in a valid format")
 	}
+}
+
+func setupWatchers() error {
+	var err error
+	watcher, err = fsnotify.NewWatcher()
+
+	if err != nil {
+		log.Println("Watcher could not be initialised")
+		return err
+	}
+
+	go func() {
+		for {
+			select {
+			case ev := <-watcher.Event:
+				if ev.Name == filepath.Join(root, *optTemplate) {
+					setupTemplate()
+				} else {
+					delete(cache, ev.Name)
+				}
+			case err := <-watcher.Error:
+				log.Println(err)
+			}
+		}
+	}()
+
+	err = watcher.Watch(root)
+	if err != nil {
+		log.Println("Could not watch path")
+		return err
+	}
+
+	return nil
 }
 
 func renderer(w http.ResponseWriter, r *http.Request) {
@@ -93,80 +136,80 @@ func renderer(w http.ResponseWriter, r *http.Request) {
 		file = *optDefault
 	}
 
-  abs := path.Join(root, p, file) + "." + *optExt
+	abs := path.Join(root, p, file) + "." + *optExt
 
-  var page *Page
-  var ok bool
-  var err error
+	var page *Page
+	var ok bool
+	var err error
 
-  if page, ok = cache[abs]; !ok {
-    page, err = GetPage(abs)
+	if page, ok = cache[abs]; !ok {
+		page, err = GetPage(abs)
 
-    if err != nil {
-      log.Printf("[%v] %v", abs, err)
-      writeError(w, r, err)
-      return
-    }
+		if err != nil {
+			log.Printf("[%v] %v", abs, err)
+			writeError(w, r, err)
+			return
+		}
 
-    if !*optDebug {
-      cache[abs] = page
-    }
-  }
+		if !*optDebug {
+			cache[abs] = page
+		}
+	}
 
-  write(w, r, page)
+	write(w, r, page)
 }
 
 func write(w http.ResponseWriter, r *http.Request, page *Page) {
-  if etag := r.Header.Get("If-None-Match"); strings.EqualFold(etag, page.Hash) {
-    w.WriteHeader(http.StatusNotModified)
-    return
-  }
+	if etag := r.Header.Get("If-None-Match"); strings.EqualFold(etag, page.Hash) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
 
-  w.Header().Set("Etag", page.Hash)
-  w.Header().Set("Content-Type", "text/html; charset=UTF-8")
+	w.Header().Set("Etag", page.Hash)
+	w.Header().Set("Content-Type", "text/html; charset=UTF-8")
 
-  if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
-    b := new(bytes.Buffer)
-    gz := gzip.NewWriter(b)
-    gz.Write(tmpl[0])
-    gz.Write(page.Content)
-    gz.Write(tmpl[1])
-    gz.Close()
+	if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+		b := new(bytes.Buffer)
+		gz := gzip.NewWriter(b)
+		gz.Write(tmpl[0])
+		gz.Write(page.Content)
+		gz.Write(tmpl[1])
+		gz.Close()
 
-    w.Header().Set("Content-Encoding", "gzip")
-    w.Header().Set("Content-Length", strconv.Itoa(b.Len()))
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Content-Length", strconv.Itoa(b.Len()))
 
-    b.WriteTo(w)
-  } else {
-    w.Header().Set("Content-Length", strconv.Itoa(len(tmpl[0]) + len(page.Content) + len(tmpl[1])))
-    w.Write(tmpl[0])
-    w.Write(page.Content)
-    w.Write(tmpl[1])
-  }
+		b.WriteTo(w)
+	} else {
+		w.Header().Set("Content-Length", strconv.Itoa(len(tmpl[0])+len(page.Content)+len(tmpl[1])))
+		w.Write(tmpl[0])
+		w.Write(page.Content)
+		w.Write(tmpl[1])
+	}
 }
 
 func writeError(w http.ResponseWriter, r *http.Request, err error) {
-  errFmt := "<h2>Oops! We've hit a bit of a problem...</h2><p>%v</p>"
+	errFmt := "<h2>Oops! We've hit a bit of a problem...</h2><p>%v</p>"
 
-  w.Header().Set("Content-Type", "text/html; charset=UTF-8")
+	w.Header().Set("Content-Type", "text/html; charset=UTF-8")
 
-  b := new(bytes.Buffer)
-  b.Write(tmpl[0])
+	b := new(bytes.Buffer)
+	b.Write(tmpl[0])
 
-  if pErr, ok := err.(*PageError); ok {
-    w.WriteHeader(pErr.StatusCode)
-    fmt.Fprintf(b, errFmt, pErr.Message)
-  } else {
-    w.WriteHeader(http.StatusInternalServerError)
-    fmt.Fprintf(b, errFmt, "Page not available")
-  }
+	if pErr, ok := err.(*PageError); ok {
+		w.WriteHeader(pErr.StatusCode)
+		fmt.Fprintf(b, errFmt, pErr.Message)
+	} else {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintf(b, errFmt, "Page not available")
+	}
 
-  b.Write(tmpl[1])
-  b.WriteTo(w)
+	b.Write(tmpl[1])
+	b.WriteTo(w)
 }
 
 func hash(value []byte) []byte {
-  h := md5.New()
-  h.Write(value)
-  return h.Sum(nil)
+	h := md5.New()
+	h.Write(value)
+	return h.Sum(nil)
 }
