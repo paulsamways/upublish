@@ -9,12 +9,13 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
 	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
-
-	"github.com/howeyc/fsnotify"
+	"syscall"
 )
 
 var optAddr = flag.String("addr", ":8000", "address to listen on")
@@ -23,12 +24,10 @@ var optStaticDir = flag.String("public", "public", "name of the 'public' directo
 var optTemplate = flag.String("tmpl", "template.html", "template to use")
 var optHomeDir = flag.String("home", "", "home directory")
 var optDefault = flag.String("default", "index", "default file to render")
-var optDebug = flag.Bool("debug", false, "enables debug mode")
 var optExt = flag.String("ext", "md", "extension of the markdown files")
 
 var root string
 var cache map[string]*Page
-var watcher *fsnotify.Watcher
 var tmpl [][]byte
 var tmplHash []byte
 
@@ -42,15 +41,11 @@ func main() {
 		log.Fatalf("Could not get the absolute path of %v. %v", *optPath, err)
 	}
 
-	setupStatic()
+	setupStaticDir()
 	setupTemplate()
-	err = setupWatchers()
+	setupSignals()
 
-	if err == nil {
-		defer watcher.Close()
-	}
-
-	http.HandleFunc("/", renderer)
+	http.HandleFunc("/", renderPage)
 
 	err = http.ListenAndServe(*optAddr, nil)
 
@@ -59,7 +54,7 @@ func main() {
 	}
 }
 
-func setupStatic() {
+func setupStaticDir() {
 	static := "/" + *optStaticDir + "/"
 	public := filepath.Join(root, *optStaticDir)
 
@@ -75,8 +70,6 @@ func setupStatic() {
 }
 
 func setupTemplate() {
-	cache = make(map[string]*Page)
-
 	path := filepath.Join(root, *optTemplate)
 	b, err := ioutil.ReadFile(path)
 
@@ -90,42 +83,22 @@ func setupTemplate() {
 	if len(tmpl) != 2 {
 		log.Fatal("Template was not in a valid format")
 	}
+
+	cache = make(map[string]*Page)
 }
 
-func setupWatchers() error {
-	var err error
-	watcher, err = fsnotify.NewWatcher()
-
-	if err != nil {
-		log.Println("Watcher could not be initialised")
-		return err
-	}
+func setupSignals() {
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, syscall.SIGUSR1)
 
 	go func() {
-		for {
-			select {
-			case ev := <-watcher.Event:
-				if ev.Name == filepath.Join(root, *optTemplate) {
-					setupTemplate()
-				} else {
-					delete(cache, ev.Name)
-				}
-			case err := <-watcher.Error:
-				log.Println(err)
-			}
-		}
+		<-c
+		setupTemplate()
+		log.Println("SIGUSR1: Template and page cache cleared.")
 	}()
-
-	err = watcher.Watch(root)
-	if err != nil {
-		log.Println("Could not watch path")
-		return err
-	}
-
-	return nil
 }
 
-func renderer(w http.ResponseWriter, r *http.Request) {
+func renderPage(w http.ResponseWriter, r *http.Request) {
 	p, file := path.Split(r.URL.Path)
 
 	if p == "" {
@@ -151,9 +124,7 @@ func renderer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if !*optDebug {
-			cache[abs] = page
-		}
+		cache[abs] = page
 	}
 
 	write(w, r, page)
