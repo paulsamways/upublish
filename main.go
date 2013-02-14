@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/md5"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -16,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
 var optAddr = flag.String("addr", ":8000", "address to listen on")
@@ -28,6 +30,7 @@ var optExt = flag.String("ext", "md", "extension of the markdown files")
 
 var root string
 var cache map[string]*Page
+var indexCache map[string][]PageIndex
 var tmpl [][]byte
 var tmplHash []byte
 
@@ -44,6 +47,7 @@ func main() {
 	setupStaticDir()
 	setupTemplate()
 	setupSignals()
+  setupIndexes()
 
 	http.HandleFunc("/", renderPage)
 
@@ -52,6 +56,47 @@ func main() {
 	if err != nil {
 		log.Fatalf("Could not serve static files at path %v. %v", root, err)
 	}
+}
+
+type PageIndex struct {
+  Path string
+  Date time.Time
+  Summary string
+  Tags []string
+}
+
+func setupIndexes() {
+  indexCache = make(map[string][]PageIndex)
+
+  filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+    if info.IsDir() && strings.HasPrefix(info.Name(), ".") {
+      return filepath.SkipDir
+    }
+
+    if !info.IsDir() && info.Name() == *optDefault + ".json" {
+      f, err := os.Open(path)
+      if err != nil {
+        log.Fatalf("Couldn't open %v for reading: %v", path, err)
+        return err
+      }
+
+      defer f.Close()
+
+      var pages []PageIndex
+
+      jsdec := json.NewDecoder(f)
+      err = jsdec.Decode(&pages)
+
+      if err != nil {
+        log.Fatalf("Couldn't parse %v as an index file: %v", path, err)
+        return err
+      }
+
+      indexCache[path] = pages
+    }
+
+    return nil
+  })
 }
 
 func setupStaticDir() {
