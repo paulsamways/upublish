@@ -59,7 +59,7 @@ func main() {
 }
 
 type PageIndex struct {
-  Path string
+  Name string
   Date time.Time
   Summary string
   Tags []string
@@ -154,7 +154,14 @@ func renderPage(w http.ResponseWriter, r *http.Request) {
 		file = *optDefault
 	}
 
-	abs := path.Join(root, p, file) + "." + *optExt
+	abs := path.Join(root, p, file)
+
+  if pIdx, ok := indexCache[abs + ".json"]; ok {
+    renderIndex(w, r, pIdx)
+    return
+  }
+
+  abs = abs + "." + *optExt
 
 	var page *Page
 	var ok bool
@@ -173,6 +180,16 @@ func renderPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	write(w, r, page)
+}
+
+func renderIndex(w http.ResponseWriter, r *http.Request, pIdx []PageIndex) {
+  w.Write(tmpl[0])
+  fmt.Fprintln(w, "<h2>Blog</h2>")
+  for i := 0; i < len(pIdx); i++ {
+    fmt.Fprintf(w, "<h3>%v</h3>\n<p>%v</p>\n", pIdx[i].Name, pIdx[i].Summary)
+  }
+
+  w.Write(tmpl[1])
 }
 
 func write(w http.ResponseWriter, r *http.Request, page *Page) {
