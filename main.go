@@ -192,13 +192,16 @@ func renderIndex(w http.ResponseWriter, r *http.Request, pIdx []PageIndex) {
   w.Write(tmpl[1])
 }
 
-func write(w http.ResponseWriter, r *http.Request, page *Page) {
-	if etag := r.Header.Get("If-None-Match"); strings.EqualFold(etag, page.Hash) {
-		w.WriteHeader(http.StatusNotModified)
-		return
-	}
+func write(w http.ResponseWriter, r *http.Request, bytes []byte, hash []byte) {
+  if len(hash) > 0 {
+    if etag := r.Header.Get("If-None-Match"); strings.EqualFold(etag, hash) {
+      w.WriteHeader(http.StatusNotModified)
+      return
+    }
 
-	w.Header().Set("Etag", page.Hash)
+    w.Header().Set("Etag", hash)
+  }
+
 	w.Header().Set("Content-Type", "text/html; charset=UTF-8")
 
 	if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
