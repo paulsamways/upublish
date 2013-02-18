@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -23,80 +22,36 @@ import (
 var optAddr = flag.String("addr", ":8000", "address to listen on")
 var optPath = flag.String("path", ".", "path of the static files to serve")
 var optStaticDir = flag.String("public", "public", "name of the 'public' directory")
-var optTemplate = flag.String("tmpl", "template.html", "template to use")
-var optHomeDir = flag.String("home", "", "home directory")
-var optDefault = flag.String("default", "index", "default file to render")
-var optExt = flag.String("ext", "md", "extension of the markdown files")
 
 var root string
-var cache map[string]*Page
-var indexCache map[string][]PageIndex
-var tmpl [][]byte
-var tmplHash []byte
+var tree *Dir
 
 func main() {
 	flag.Parse()
 
 	var err error
-	root, err = filepath.Abs(*optPath)
 
-	if err != nil {
+	if root, err = filepath.Abs(*optPath);  err != nil {
 		log.Fatalf("Could not get the absolute path of %v. %v", *optPath, err)
 	}
 
 	setupStaticDir()
-	setupTemplate()
 	setupSignals()
-  setupIndexes()
+
+  var errs []error
+  if tree, errs = ReadTree(root); len(errs) > 0 {
+    for _, err = range errs {
+      log.Printf("%v\n", err)
+    }
+
+    log.Fatalf("Found %v errors", len(errs))
+  }
 
 	http.HandleFunc("/", renderPage)
 
-	err = http.ListenAndServe(*optAddr, nil)
-
-	if err != nil {
+	if err = http.ListenAndServe(*optAddr, nil); err != nil {
 		log.Fatalf("Could not serve static files at path %v. %v", root, err)
 	}
-}
-
-type PageIndex struct {
-  Name string
-  Date time.Time
-  Summary string
-  Tags []string
-}
-
-func setupIndexes() {
-  indexCache = make(map[string][]PageIndex)
-
-  filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-    if info.IsDir() && strings.HasPrefix(info.Name(), ".") {
-      return filepath.SkipDir
-    }
-
-    if !info.IsDir() && info.Name() == *optDefault + ".json" {
-      f, err := os.Open(path)
-      if err != nil {
-        log.Fatalf("Couldn't open %v for reading: %v", path, err)
-        return err
-      }
-
-      defer f.Close()
-
-      var pages []PageIndex
-
-      jsdec := json.NewDecoder(f)
-      err = jsdec.Decode(&pages)
-
-      if err != nil {
-        log.Fatalf("Couldn't parse %v as an index file: %v", path, err)
-        return err
-      }
-
-      indexCache[path] = pages
-    }
-
-    return nil
-  })
 }
 
 func setupStaticDir() {
@@ -114,92 +69,43 @@ func setupStaticDir() {
 	})
 }
 
-func setupTemplate() {
-	path := filepath.Join(root, *optTemplate)
-	b, err := ioutil.ReadFile(path)
-
-	if err != nil {
-		log.Fatal("Could not read template: ", err)
-	}
-
-	tmplHash = hash(b)
-	tmpl = bytes.Split(b, []byte("{{content}}"))
-
-	if len(tmpl) != 2 {
-		log.Fatal("Template was not in a valid format")
-	}
-
-	cache = make(map[string]*Page)
-}
-
 func setupSignals() {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, syscall.SIGUSR1)
 
 	go func() {
 		<-c
-		setupTemplate()
-		log.Println("SIGUSR1: Template and page cache cleared.")
+		//tree = parseTree()
 	}()
 }
 
 func renderPage(w http.ResponseWriter, r *http.Request) {
-	p, file := path.Split(r.URL.Path)
-
-	if p == "" {
-		p = *optHomeDir
-	}
-
-	if file == "" {
-		file = *optDefault
-	}
-
-	abs := path.Join(root, p, file)
-
-  if pIdx, ok := indexCache[abs + ".json"]; ok {
-    renderIndex(w, r, pIdx)
-    return
-  }
-
-  abs = abs + "." + *optExt
-
-	var page *Page
-	var ok bool
-	var err error
-
-	if page, ok = cache[abs]; !ok {
-		page, err = GetPage(abs)
-
-		if err != nil {
-			log.Printf("[%v] %v", abs, err)
-			writeError(w, r, err)
-			return
-		}
-
-		cache[abs] = page
-	}
-
-	write(w, r, page)
+  
+	write(w, r, page.Content, page.Hash)
 }
 
 func renderIndex(w http.ResponseWriter, r *http.Request, pIdx []PageIndex) {
-  w.Write(tmpl[0])
-  fmt.Fprintln(w, "<h2>Blog</h2>")
+  b := bytes.Buffer{}
+
+  fmt.Fprintln(b, "<h2>Blog</h2>")
   for i := 0; i < len(pIdx); i++ {
-    fmt.Fprintf(w, "<h3>%v</h3>\n<p>%v</p>\n", pIdx[i].Name, pIdx[i].Summary)
+    fmt.Fprintf(b, "<h3>%v</h3>\n<p>%v</p>\n", pIdx[i].Name, pIdx[i].Summary)
   }
 
-  w.Write(tmpl[1])
+  b = baseLayout.Render(b)
+
 }
 
-func write(w http.ResponseWriter, r *http.Request, bytes []byte, hash []byte) {
+func write(w http.ResponseWriter, r *http.Request, value []byte, hash []byte) {
   if len(hash) > 0 {
-    if etag := r.Header.Get("If-None-Match"); strings.EqualFold(etag, hash) {
+    strHash := fmt.Sprintf("%x", hash)
+
+    if etag := r.Header.Get("If-None-Match"); strings.EqualFold(etag, strHash) {
       w.WriteHeader(http.StatusNotModified)
       return
     }
 
-    w.Header().Set("Etag", hash)
+    w.Header().Set("Etag", strHash)
   }
 
 	w.Header().Set("Content-Type", "text/html; charset=UTF-8")
@@ -208,7 +114,7 @@ func write(w http.ResponseWriter, r *http.Request, bytes []byte, hash []byte) {
 		b := new(bytes.Buffer)
 		gz := gzip.NewWriter(b)
 		gz.Write(tmpl[0])
-		gz.Write(page.Content)
+		gz.Write(value)
 		gz.Write(tmpl[1])
 		gz.Close()
 
@@ -217,9 +123,9 @@ func write(w http.ResponseWriter, r *http.Request, bytes []byte, hash []byte) {
 
 		b.WriteTo(w)
 	} else {
-		w.Header().Set("Content-Length", strconv.Itoa(len(tmpl[0])+len(page.Content)+len(tmpl[1])))
+		w.Header().Set("Content-Length", strconv.Itoa(len(tmpl[0])+len(value)+len(tmpl[1])))
 		w.Write(tmpl[0])
-		w.Write(page.Content)
+		w.Write(value)
 		w.Write(tmpl[1])
 	}
 }
@@ -244,8 +150,4 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 	b.WriteTo(w)
 }
 
-func hash(value []byte) []byte {
-	h := md5.New()
-	h.Write(value)
-	return h.Sum(nil)
-}
+
