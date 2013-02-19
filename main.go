@@ -164,6 +164,6 @@ func write(w http.ResponseWriter, r *http.Request, statusCode int, value []byte,
 
 	w.Header().Set("Content-Length", strconv.Itoa(b.Len()))
 	w.Header().Set("Content-Type", "text/html; charset=UTF-8")
-  w.WriteHeader(statusCode)
+	w.WriteHeader(statusCode)
 	b.WriteTo(w)
 }
