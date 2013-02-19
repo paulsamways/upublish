@@ -3,25 +3,22 @@ package main
 import (
 	"bytes"
 	"compress/gzip"
-	"crypto/md5"
-	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
-	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
-	"time"
 )
 
 var optAddr = flag.String("addr", ":8000", "address to listen on")
 var optPath = flag.String("path", ".", "path of the static files to serve")
-var optStaticDir = flag.String("public", "public", "name of the 'public' directory")
+var optStaticDir = flag.String("public", ".public", "path of the 'public' directory")
 
 var root string
 var tree *Dir
@@ -38,13 +35,9 @@ func main() {
 	setupStaticDir()
 	setupSignals()
 
-  var errs []error
-  if tree, errs = ReadTree(root); len(errs) > 0 {
-    for _, err = range errs {
-      log.Printf("%v\n", err)
-    }
-
-    log.Fatalf("Found %v errors", len(errs))
+  var ok bool
+  if tree, ok = readTree(); !ok {
+    log.Fatalf("Exiting...")
   }
 
 	http.HandleFunc("/", renderPage)
@@ -55,12 +48,11 @@ func main() {
 }
 
 func setupStaticDir() {
-	static := "/" + *optStaticDir + "/"
 	public := filepath.Join(root, *optStaticDir)
 
-	h := http.StripPrefix(static, http.FileServer(http.Dir(public)))
+	h := http.StripPrefix("/public/", http.FileServer(http.Dir(public)))
 
-	http.Handle(static, h)
+	http.Handle("/public/", h)
 	http.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, filepath.Join(public, "favicon.ico"))
 	})
@@ -75,30 +67,80 @@ func setupSignals() {
 
 	go func() {
 		<-c
-		//tree = parseTree()
+
+    log.Print("\nReloading...")
+    var d *Dir
+    var ok bool
+
+    if d, ok = readTree(); !ok {
+      log.Println("Reload unsuccessful")
+    } else {
+      //lock
+      tree = d
+    }
 	}()
 }
 
-func renderPage(w http.ResponseWriter, r *http.Request) {
-  
-	write(w, r, page.Content, page.Hash)
-}
+func readTree() (*Dir, bool) {
+  var dir *Dir
+  var errs []error
+  if dir, errs = ReadTree(root); len(errs) > 0 {
+    for _, err := range errs {
+      log.Printf("%v\n", err)
+    }
 
-func renderIndex(w http.ResponseWriter, r *http.Request, pIdx []PageIndex) {
-  b := bytes.Buffer{}
-
-  fmt.Fprintln(b, "<h2>Blog</h2>")
-  for i := 0; i < len(pIdx); i++ {
-    fmt.Fprintf(b, "<h3>%v</h3>\n<p>%v</p>\n", pIdx[i].Name, pIdx[i].Summary)
+    log.Printf("Found %v errors\n", len(errs))
+    return nil, false
   }
 
-  b = baseLayout.Render(b)
-
+  return dir, true
 }
 
-func write(w http.ResponseWriter, r *http.Request, value []byte, hash []byte) {
+func renderPage(w http.ResponseWriter, r *http.Request) {
+  p, file := filepath.Split(r.URL.Path)
+
+  if file == "" {
+    file = "index"
+  }
+
+  dir := tree.FindByPath(p)
+
+  if dir == nil {
+    write(w, r, []byte("Path Not found"), nil, tree.Layout)
+    return
+  }
+
+  cf, ok := dir.Files[file]
+  if !ok {
+    write(w, r, []byte("Page not found"), nil, dir.Layout)
+    return
+  }
+
+  write(w, r, cf.Content, cf.Hash, dir.Layout)
+}
+
+type nCloseWriter struct {
+  io.Writer
+}
+func (w nCloseWriter) Close() error {
+  return nil
+}
+func NoOpCloseWriter(w io.Writer) io.WriteCloser {
+  return nCloseWriter{w}
+}
+
+func write(w http.ResponseWriter, r *http.Request, value []byte, hash []byte, layout *LayoutFile) {
   if len(hash) > 0 {
-    strHash := fmt.Sprintf("%x", hash)
+    h := make([]byte, 16)
+    copy(h, hash)
+
+    if layout != nil {
+      for i := 0; i < 16; i++ {
+        h[i] ^= layout.Hash[i]
+      }
+    }
+
+    strHash := fmt.Sprintf("%x", h)
 
     if etag := r.Header.Get("If-None-Match"); strings.EqualFold(etag, strHash) {
       w.WriteHeader(http.StatusNotModified)
@@ -110,44 +152,27 @@ func write(w http.ResponseWriter, r *http.Request, value []byte, hash []byte) {
 
 	w.Header().Set("Content-Type", "text/html; charset=UTF-8")
 
-	if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
-		b := new(bytes.Buffer)
-		gz := gzip.NewWriter(b)
-		gz.Write(tmpl[0])
-		gz.Write(value)
-		gz.Write(tmpl[1])
-		gz.Close()
-
+  b := &bytes.Buffer{}
+  var writer io.WriteCloser = NoOpCloseWriter(b)
+  if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
 		w.Header().Set("Content-Encoding", "gzip")
-		w.Header().Set("Content-Length", strconv.Itoa(b.Len()))
+    writer = gzip.NewWriter(b)
+  }
 
-		b.WriteTo(w)
-	} else {
-		w.Header().Set("Content-Length", strconv.Itoa(len(tmpl[0])+len(value)+len(tmpl[1])))
-		w.Write(tmpl[0])
-		w.Write(value)
-		w.Write(tmpl[1])
-	}
+  if layout != nil {
+    writer.Write(layout.Pre)
+    writer.Write(value)
+    writer.Write(layout.Post)
+  } else {
+    writer.Write(value)
+  }
+
+  writer.Close()
+
+	w.Header().Set("Content-Length", strconv.Itoa(b.Len()))
+  b.WriteTo(w)
 }
 
 func writeError(w http.ResponseWriter, r *http.Request, err error) {
-	errFmt := "<h2>Oops! We've hit a bit of a problem...</h2><p>%v</p>"
-
-	w.Header().Set("Content-Type", "text/html; charset=UTF-8")
-
-	b := new(bytes.Buffer)
-	b.Write(tmpl[0])
-
-	if pErr, ok := err.(*PageError); ok {
-		w.WriteHeader(pErr.StatusCode)
-		fmt.Fprintf(b, errFmt, pErr.Message)
-	} else {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(b, errFmt, "Page not available")
-	}
-
-	b.Write(tmpl[1])
-	b.WriteTo(w)
+	fmt.Fprintf(w, "<h2>Oops! We've hit a bit of a problem...</h2><p>%v</p>", err)
 }
-
-
