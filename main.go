@@ -105,12 +105,12 @@ func renderPage(w http.ResponseWriter, r *http.Request) {
 
 	if d := tree.FindByPath(p); d != nil {
 		if cf, ok := d.Files[file]; ok {
-			write(w, r, 404, cf.Content, cf.Hash, d.Layout)
+			write(w, r, 200, cf.Content, cf.Hash, d.Layout)
 			return
 		}
 	}
 
-	write(w, r, 200, []byte("<h2>Oops! We've hit a bit of a problem...</h2><p>Page not found!</p>"), nil, tree.Layout)
+	write(w, r, 404, []byte("<h2>Oops! We've hit a bit of a problem...</h2><p>Page not found!</p>"), nil, tree.Layout)
 }
 
 type nCloseWriter struct {
