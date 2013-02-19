@@ -110,7 +110,7 @@ func renderPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	write(w, r, 404, []byte("<h2>Oops! We've hit a bit of a problem...</h2><p>Page not found!</p>"), nil, tree.Layout)
+	write(w, r, 200, []byte("<h2>Oops! We've hit a bit of a problem...</h2><p>Page not found!</p>"), nil, tree.Layout)
 }
 
 type nCloseWriter struct {
