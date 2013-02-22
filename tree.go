@@ -3,11 +3,13 @@ package main
 import (
 	"bytes"
 	"crypto/md5"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	md "github.com/russross/blackfriday"
 )
@@ -38,6 +40,12 @@ type LayoutFile struct {
 }
 
 type MetaFile struct {
+  Pages []*Page
+}
+type Page struct {
+  Path, Title, Summary string
+  Tags []string
+  Date time.Time
 }
 
 func ReadTree(base string) (*Dir, []error) {
@@ -162,7 +170,23 @@ func readLayoutFile(dir, name string, parent *LayoutFile) (*LayoutFile, error) {
 	return lf, nil
 }
 func readMetaFile(dir, name string) (*MetaFile, error) {
-	return nil, nil
+  p := filepath.Join(dir, name)
+
+  fd, err := os.Open(p)
+  if err != nil {
+    return nil, err
+  }
+  defer fd.Close()
+
+  var pages []*Page
+  js := json.NewDecoder(fd)
+  if err = js.Decode(&pages); err != nil {
+    return nil, err
+  }
+
+  return &MetaFile{
+    Pages: pages,
+  }, nil
 }
 
 func hash(value []byte) []byte {
