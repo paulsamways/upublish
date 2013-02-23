@@ -107,7 +107,12 @@ func renderPage(w http.ResponseWriter, r *http.Request) {
 		if cf, ok := d.Files[file]; ok {
 			write(w, r, 200, cf.Content, cf.Hash, d.Layout)
 			return
-		}
+		} else {
+      if d.Meta != nil && file == "index" {
+        renderIndex(d, w, r)
+        return
+      }
+    }
 	}
 
 	write(w, r, 404, []byte("<h2>Oops! We've hit a bit of a problem...</h2><p>Page not found!</p>"), nil, tree.Layout)

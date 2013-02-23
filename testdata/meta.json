@@ -2,6 +2,10 @@
   {
     "Path": "testdata/test",
     "Title": "Test Page",
-    "Summary": "This is a test page"
+    "Summary": "This is a test page",
+    "Date": "2013-02-22T14:22:00Z",
+    "Tags": [
+      "One", "Two", "Three"
+    ]
   }
 ]
