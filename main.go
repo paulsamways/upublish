@@ -66,18 +66,20 @@ func setupSignals() {
 	signal.Notify(c, syscall.SIGUSR1)
 
 	go func() {
-		<-c
+    for {
+      <-c
 
-		log.Print("\nReloading...")
-		var d *Dir
-		var ok bool
+      log.Print("\nReloading...")
+      var d *Dir
+      var ok bool
 
-		if d, ok = readTree(); !ok {
-			log.Println("Reload unsuccessful")
-		} else {
-			//lock
-			tree = d
-		}
+      if d, ok = readTree(); !ok {
+        log.Println("Reload unsuccessful")
+      } else {
+        //lock
+        tree = d
+      }
+    }
 	}()
 }
 
