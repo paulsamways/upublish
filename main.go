@@ -66,20 +66,20 @@ func setupSignals() {
 	signal.Notify(c, syscall.SIGUSR1)
 
 	go func() {
-    for {
-      <-c
+		for {
+			<-c
 
-      log.Print("\nReloading...")
-      var d *Dir
-      var ok bool
+			log.Print("\nReloading...")
+			var d *Dir
+			var ok bool
 
-      if d, ok = readTree(); !ok {
-        log.Println("Reload unsuccessful")
-      } else {
-        //lock
-        tree = d
-      }
-    }
+			if d, ok = readTree(); !ok {
+				log.Println("Reload unsuccessful")
+			} else {
+				//lock
+				tree = d
+			}
+		}
 	}()
 }
 
@@ -109,12 +109,7 @@ func renderPage(w http.ResponseWriter, r *http.Request) {
 		if cf, ok := d.Files[file]; ok {
 			write(w, r, 200, cf.Content, cf.Hash, d.Layout)
 			return
-		} else {
-      if d.Meta != nil && file == "index" {
-        renderIndex(d, w, r)
-        return
-      }
-    }
+		}
 	}
 
 	write(w, r, 404, []byte("<h2>Oops! We've hit a bit of a problem...</h2><p>Page not found!</p>"), nil, tree.Layout)
