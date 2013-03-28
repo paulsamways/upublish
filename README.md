@@ -132,7 +132,7 @@ to be reloaded and the cache updated accordingly.
 
 &micro;Publish has been written to run as a standalone process. The easiest
 way to start the process on a Linux machine is to use Systemd. See my article
-on running [Go web servers using Systemd](/articles/go-systemd) for further information.
+on running [Go web servers using Systemd](http://paulsamways.com/articles/go-systemd) for further information.
 
 ### Getting &micro;Publish
 
