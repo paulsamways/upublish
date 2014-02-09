@@ -136,10 +136,10 @@ on running [Go web servers using Systemd](http://paulsamways.com/articles/go-sys
 
 ### Getting &micro;Publish
 
-The source can be found at https://github.com/opensimple/upublish.
+The source can be found at https://github.com/paulsamways/upublish.
 
 Alternatively, &micro;Publish can be fetched via 'go get':
 
 ``` Bash
-$ go get github.com/opensimple/upublish
+$ go get github.com/paulsamways/upublish
 ```
